@@ -20,6 +20,8 @@ from pylspclient.lsp_structs import (
 
 client = None  # Set by start_language_server
 langid = None  # Set by server
+server_process = None
+server_cmd = None
 diagnostics = {}  # Set by on_publish_diagnostics
 document_version = 0
 
@@ -65,7 +67,7 @@ CLIENT_CAPABILITIES = {
 
 def start_language_server(cmd):
     
-    global client
+    global client, server_process, server_cmd
     
     print('starting language server: "{}"'.format(cmd))
     server_process = subprocess.Popen(
@@ -95,9 +97,18 @@ def start_language_server(cmd):
         None
     )
     client.initialized()
+    server_cmd = cmd
     print('language server started')
 
 
+def restart_language_server():
+    
+    print('killing language server')
+    server_process.kill()
+    server_process.wait(timeout=2)
+    start_language_server(server_cmd)
+    
+    
 def open_document(request_data):
     
     code = request_data['code']
@@ -125,9 +136,12 @@ def calltips(request_data):
     path = request_data['path']
     logging.debug(request_data)
     td = _text_document(path, code)
-    with _timer('signatures'):
-        signatures = client.signatureHelp(td, Position(line, column))
-    if not signatures.signatures:
+    signatures = _run_command(
+        'signatures',
+        client.signatureHelp,
+        (td, Position(line, column))
+    )
+    if signatures is None or not signatures.signatures:
         return ()
     signature = signatures.signatures[signatures.activeSignature]
     return (
@@ -148,19 +162,25 @@ class CompletionProvider:
         """
         
         td = _text_document(path, code)
-        with _timer('completions'):
-            completions = client.completion(
+        completions = _run_command(
+            'completions',
+            client.completion,
+            (
                 td,
                 Position(line, column),
                 CompletionContext(CompletionTriggerKind.Invoked)
             )
+        )
+        if completions is None:
+            return []
         ret_val = []
         for completion in completions.items:
             ret_val.append({
-                'name': completion.label,
+                'name': completion.insertText,
                 'icon': ICONS.get(completion.kind, ICON_VAR),
                 'tooltip': completion.detail
             })
+        print('completion() gave {} suggestions'.format(len(ret_val)))
         return ret_val
     
     
@@ -179,8 +199,13 @@ def run_diagnostics(request_data):
     td = _text_document(path, code)
     with _timer('diagnostics'):
         client.didOpen(td)
-        while not diagnostics:
+        for _ in range(20):
+            if diagnostics:
+                break
             time.sleep(0.1)
+        else:
+            print('run_diagnostics() timed out')
+            return []
     d = diagnostics.get('diagnostics',[])
     ret_val = []
     for msg in d:
@@ -206,3 +231,19 @@ def _timer(msg):
     yield
     t1 = time.time()
     print('{} ({:.0f} ms)'.format(msg, 1000 * (t1 - t0)))
+
+
+def _run_command(name, fnc, args):
+    
+    with _timer(name):
+        try:
+            ret_val = fnc(*args)
+        except lsp_structs.ResponseError as e:
+            print('{}() gave ResponseError'.format(name))
+            print(e)
+            ret_val = None
+        except TimeoutError:
+            print('{}() gave TimeoutError'.format(name))
+            restart_language_server()
+            ret_val = None
+    return ret_val
