@@ -105,7 +105,8 @@ def restart_language_server():
     
     print('killing language server')
     server_process.kill()
-    server_process.wait(timeout=2)
+    if not server_process.wait(timeout=5):
+        print('failed to kill language server')
     start_language_server(server_cmd)
     
     
@@ -119,17 +120,7 @@ def open_document(request_data):
     
 
 def calltips(request_data):
-    """Worker that returns a list of calltips.
 
-    A calltips is a tuple made of the following parts:
-      - module_name: name of the module of the function invoked
-      - call_name: name of the function that is being called
-      - params: the list of parameter names.
-      - index: index of the current parameter
-      - bracket_start
-
-    :returns tuple(label, parameters, active_parameter, column)
-    """
     code = request_data['code']
     line = request_data['line']
     column = request_data['column']
@@ -150,6 +141,26 @@ def calltips(request_data):
         signatures.activeParameter,
         column
     )
+
+
+def symbols(request_data):
+    
+    code = request_data['code']
+    path = request_data['path']
+    symbol_kind = request_data['kind']
+    td = _text_document(path, code)
+    symbols = _run_command(
+        'symbols',
+        client.documentSymbol,
+        (td,)
+    )
+    if symbols is None:
+        return []
+    return [
+        (s.name, s.kind.name, s.location.range.start.line, s.containerName)
+        for s in symbols
+        if s.kind.name in symbol_kind
+    ]
 
 
 class CompletionProvider:
@@ -196,6 +207,7 @@ def run_diagnostics(request_data):
     diagnostics = {}
     code = request_data['code']
     path = request_data['path']
+    ignore_rules = request_data['ignore_rules']
     td = _text_document(path, code)
     with _timer('diagnostics'):
         client.didOpen(td)
@@ -209,6 +221,8 @@ def run_diagnostics(request_data):
     d = diagnostics.get('diagnostics',[])
     ret_val = []
     for msg in d:
+        if any(msg['message'].startswith(ir) for ir in ignore_rules):
+            continue
         ret_val.append((
             msg['message'],
             ERROR if msg['severity'] <= DiagnosticSeverity.Error else WARNING,
