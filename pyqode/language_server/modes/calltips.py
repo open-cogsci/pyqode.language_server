@@ -2,10 +2,10 @@
 """
 Gets calltips from the language server
 """
-from pyqode.core.api import Mode
 from pyqode.qt.QtWidgets import QToolTip
-from pyqode.qt.QtCore import QObject, Qt, Signal, QPoint
+from pyqode.qt.QtCore import QObject, Qt, Signal
 from pyqode.language_server.backend import workers
+from pyqode.language_server.modes import LanguageServerMode
 
 HIDE_KEYS = (
         Qt.Key_ParenRight,
@@ -28,14 +28,14 @@ SHOW_KEYS = (
 )
 
 
-class CalltipsMode(Mode, QObject):
+class CalltipsMode(LanguageServerMode, QObject):
     
     tooltip_display_requested = Signal(object, int)
     tooltip_hide_requested = Signal()
 
     def __init__(self):
         
-        Mode.__init__(self)
+        LanguageServerMode.__init__(self)
         QObject.__init__(self)
         self.tooltip_display_requested.connect(self._display_tooltip)
         self.tooltip_hide_requested.connect(QToolTip.hideText)
@@ -77,12 +77,10 @@ class CalltipsMode(Mode, QObject):
             },
             on_receive=self._on_results_available
         )
-        
-
+    
     def _on_results_available(self, results):
         
         self._working = False
-        print(results)
         if not results:
             return
         call = {
