@@ -18,13 +18,6 @@ from pylspclient.lsp_structs import (
     DiagnosticSeverity
 )
 
-client = None  # Set by start_language_server
-langid = None  # Set by server
-server_process = None
-server_cmd = None
-diagnostics = {}  # Set by on_publish_diagnostics
-document_version = 0
-
 WARNING = 1
 ERROR = 2
 ICON_PATH = ('path', ':/pyqode_python_icons/rc/path.png')
@@ -39,6 +32,18 @@ ICONS = {
     CompletionItemKind.Variable: ICON_VAR,
     CompletionItemKind.Keyword: ICON_KEYWORD,
 }
+SERVER_NOT_STARTED = 0
+SERVER_RUNNING = 1
+SERVER_ERROR = 2
+
+client = None  # Set by start_language_server
+server_status = SERVER_NOT_STARTED
+langid = None  # Set by server
+server_process = None
+server_cmd = None
+diagnostics = {}  # Set by on_publish_diagnostics
+document_version = 0
+
 
 CLIENT_CAPABILITIES = {
     'textDocument': {
@@ -67,22 +72,27 @@ CLIENT_CAPABILITIES = {
 
 def start_language_server(cmd):
     
-    global client, server_process, server_cmd
+    global client, server_process, server_cmd, server_status
     
     print('starting language server: "{}"'.format(cmd))
-    server_process = subprocess.Popen(
-        shlex.split(cmd),
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE
-    )
+    try:
+        server_process = subprocess.Popen(
+            shlex.split(cmd),
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+    except FileNotFoundError:
+        server_status = SERVER_ERROR
+        return
+    server_status = SERVER_RUNNING
     json_rpc_endpoint = JsonRpcEndpoint(
         server_process.stdin,
         server_process.stdout
     )
     endpoint = LspEndpoint(
         json_rpc_endpoint,
-        notify_callbacks = {
+        notify_callbacks={
             'textDocument/publishDiagnostics': on_publish_diagnostics
         }
     )
@@ -103,24 +113,31 @@ def start_language_server(cmd):
 
 def restart_language_server():
     
+    global client, server_status
     print('killing language server')
+    client = None
     server_process.kill()
     if not server_process.wait(timeout=5):
         print('failed to kill language server')
+    server_status = SERVER_NOT_STARTED
     start_language_server(server_cmd)
-    
-    
+
+
 def open_document(request_data):
-    
+
+    if server_status != SERVER_RUNNING:
+        return
     code = request_data['code']
     path = request_data['path']
     print('opening document "{}"'.format(path))
     td = _text_document(path, code)
     client.didOpen(td)
-    
+
 
 def calltips(request_data):
 
+    if server_status != SERVER_RUNNING:
+        return ()
     code = request_data['code']
     line = request_data['line']
     column = request_data['column']
@@ -145,6 +162,8 @@ def calltips(request_data):
 
 def symbols(request_data):
     
+    if server_status != SERVER_RUNNING:
+        return []
     code = request_data['code']
     path = request_data['path']
     symbol_kind = request_data['kind']
@@ -203,6 +222,8 @@ def on_publish_diagnostics(d):
 
 def run_diagnostics(request_data):
     
+    if server_status != SERVER_RUNNING:
+        return [server_status]
     global diagnostics
     diagnostics = {}
     code = request_data['code']
@@ -218,8 +239,8 @@ def run_diagnostics(request_data):
         else:
             print('run_diagnostics() timed out')
             return []
-    d = diagnostics.get('diagnostics',[])
-    ret_val = []
+    d = diagnostics.get('diagnostics', [])
+    ret_val = [server_status]
     for msg in d:
         if any(msg['message'].startswith(ir) for ir in ignore_rules):
             continue
