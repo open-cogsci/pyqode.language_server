@@ -205,8 +205,13 @@ class CompletionProvider:
             return []
         ret_val = []
         for completion in completions.items:
+            # The label tends to include parentheses etc., and that's why it's
+            # better to use insertText when available.
+            text = completion.insertText
+            if not text:
+                text = completion.label
             ret_val.append({
-                'name': completion.insertText,
+                'name': text,
                 'icon': ICONS.get(completion.kind, ICON_VAR),
                 'tooltip': completion.detail
             })
