@@ -26,12 +26,17 @@ if __name__ == '__main__':
         '--langid',
         help='The language identifier'
     )
+    parser.add_argument(
+        'project_folders',
+        nargs='+',
+        help='A list of project folders'
+    )
     args = parser.parse_args()
 
     from pyqode.core import backend
     from pyqode.language_server.backend import workers
 
-    workers.start_language_server(args.command)
+    workers.start_language_server(args.command, args.project_folders)
     workers.langid = args.langid
     backend.CodeCompletionWorker.providers += [
         workers.CompletionProvider(),

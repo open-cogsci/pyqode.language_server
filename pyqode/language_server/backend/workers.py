@@ -41,6 +41,7 @@ server_status = SERVER_NOT_STARTED
 langid = None  # Set by server
 server_process = None
 server_cmd = None
+project_folders = None
 diagnostics = {}  # Set by on_publish_diagnostics
 document_version = 0
 
@@ -70,9 +71,9 @@ CLIENT_CAPABILITIES = {
 }
 
 
-def start_language_server(cmd):
+def start_language_server(cmd, folders):
     
-    global client, server_process, server_cmd, server_status
+    global client, server_process, server_cmd, server_status, project_folders
     
     print('starting language server: "{}"'.format(cmd))
     try:
@@ -97,17 +98,24 @@ def start_language_server(cmd):
         }
     )
     client = LspClient(endpoint)
-    server_capabilities = client.initialize(
-        server_process.pid,
-        None,
-        None,
-        None,
-        CLIENT_CAPABILITIES,
-        'off',
-        None
-    )
+    project_folders = _path_to_uri(folders)
+    try:
+        client.initialize(
+            processId=server_process.pid,
+            rootPath=None,
+            rootUri=project_folders[0],
+            initializationOptions=None,
+            capabilities=CLIENT_CAPABILITIES,
+            trace='off',
+            workspaceFolders=project_folders
+        )
+    except lsp_structs.ResponseError as e:
+        print('failed to initialize language server: {}'.format(e))
+        server_status = SERVER_ERROR
+        return
     client.initialized()
     server_cmd = cmd
+    print('project_folders {}'.format(project_folders))
     print('language server started')
 
 
@@ -120,7 +128,7 @@ def restart_language_server():
     if not server_process.wait(timeout=5):
         print('failed to kill language server')
     server_status = SERVER_NOT_STARTED
-    start_language_server(server_cmd)
+    start_language_server(server_cmd, project_folders)
 
 
 def open_document(request_data):
@@ -134,6 +142,14 @@ def open_document(request_data):
     client.didOpen(td)
 
 
+def change_project_folders(request_data):
+    
+    if server_status != SERVER_RUNNING:
+        return
+    folders = request_data['folders']
+    print('changing workspace folders: {}'.format(folders))
+    
+
 def calltips(request_data):
 
     if server_status != SERVER_RUNNING:
@@ -144,17 +160,29 @@ def calltips(request_data):
     path = request_data['path']
     logging.debug(request_data)
     td = _text_document(path, code)
-    signatures = _run_command(
-        'signatures',
-        client.signatureHelp,
-        (td, Position(line, column))
-    )
-    if signatures is None or not signatures.signatures:
+    # It appears that pyls returns an empty signature unless a didOpen is sent
+    # to the server. Therefore we first try to get signatures once, and then if
+    # this fails, try again but this time after sending a didOpen.
+    for attempt in range(2):
+        signatures = _run_command(
+            'signatures(attempt={}, line={}, column={})'.format(
+                attempt,
+                line,
+                column
+            ),
+            client.signatureHelp,
+            (td, Position(line, column))
+        )
+        if signatures is not None and signatures.signatures:
+            break
+        client.didOpen(td)
+    else:
         return ()
     signature = signatures.signatures[signatures.activeSignature]
     return (
         signature.label,
         [p.label for p in signature.parameters],
+        signature.documentation,
         signatures.activeParameter,
         column
     )
@@ -191,9 +219,10 @@ class CompletionProvider:
         :returns: a list of completions.
         """
         
+        column += len(prefix)  # Go to the cursor position
         td = _text_document(path, code)
         completions = _run_command(
-            'completions',
+            'completions(line={}, col={})'.format(line, column),
             client.completion,
             (
                 td,
@@ -203,8 +232,12 @@ class CompletionProvider:
         )
         if completions is None:
             return []
+        # It appears that the TypeScript server returns the items directly as
+        # a list, whereas other servers return the items as a property.
+        if hasattr(completions, 'items'):
+            completions = completions.items
         ret_val = []
-        for completion in completions.items:
+        for completion in completions:
             # The label tends to include parentheses etc., and that's why it's
             # better to use insertText when available.
             text = completion.insertText
@@ -235,6 +268,11 @@ def run_diagnostics(request_data):
     path = request_data['path']
     ignore_rules = request_data['ignore_rules']
     td = _text_document(path, code)
+    ret_val = {
+        'server_status': server_status,
+        'server_pid': server_process.pid,
+        'messages': []
+    }
     with _timer('diagnostics'):
         client.didOpen(td)
         for _ in range(20):
@@ -243,13 +281,12 @@ def run_diagnostics(request_data):
             time.sleep(0.1)
         else:
             print('run_diagnostics() timed out')
-            return []
+            return ret_val
     d = diagnostics.get('diagnostics', [])
-    ret_val = [server_status]
     for msg in d:
         if any(msg['message'].startswith(ir) for ir in ignore_rules):
             continue
-        ret_val.append((
+        ret_val['messages'].append((
             msg['message'],
             ERROR if msg['severity'] <= DiagnosticSeverity.Error else WARNING,
             msg['range']['start']['line']
@@ -278,12 +315,16 @@ def _run_command(name, fnc, args):
     with _timer(name):
         try:
             ret_val = fnc(*args)
-        except lsp_structs.ResponseError as e:
+        except lsp_structs.ResponseError:
             print('{}() gave ResponseError'.format(name))
-            print(e)
             ret_val = None
         except TimeoutError:
             print('{}() gave TimeoutError'.format(name))
             restart_language_server()
             ret_val = None
     return ret_val
+
+
+def _path_to_uri(paths, prefix='file://'):
+    
+    return [prefix + path for path in paths]

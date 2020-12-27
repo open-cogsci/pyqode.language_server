@@ -27,10 +27,12 @@ SHOW_KEYS = (
     Qt.Key_Comma
 )
 
+MAX_DOC_LEN = 2000
+
 
 class CalltipsMode(LanguageServerMode, QObject):
     
-    tooltip_display_requested = Signal(object, int)
+    tooltip_display_requested = Signal(str, list, str, int, int)
     tooltip_hide_requested = Signal()
 
     def __init__(self):
@@ -83,29 +85,15 @@ class CalltipsMode(LanguageServerMode, QObject):
         self._working = False
         if not results:
             return
-        call = {
-            "call.label": results[0],
-            "call.params": results[1],
-            "call.index": results[2],
-        }
-        self.tooltip_display_requested.emit(call, results[3])
+        self.tooltip_display_requested.emit(*results)
 
-    def _display_tooltip(self, call, col):
+    def _display_tooltip(self, label, params, doc, active_param, col):
         
-        if not call:
-            return
-        calltip = "<p style='white-space:pre'>{}".format(call['call.label'])
-        for i, param in enumerate(call['call.params']):
-            if i < len(call['call.params']) - 1 and not param.endswith(','):
-                param += ", "
-            if param.endswith(','):
-                param += ' '  # pep8 calltip
-            if i == call['call.index']:
-                calltip += "<b>"
-            calltip += param
-            if i == call['call.index']:
-                calltip += "</b>"
-        calltip += ')</p>'
+        calltip = "<pre>{}</pre>".format(label)
+        if doc:
+            if len(doc) > MAX_DOC_LEN:
+                doc = doc[:MAX_DOC_LEN] + '\n\n[continues]'
+            calltip += "<pre>{}</pre>".format(doc)
         position = self.editor.mapToGlobal(
             self.editor.cursorRect().bottomLeft()
         )

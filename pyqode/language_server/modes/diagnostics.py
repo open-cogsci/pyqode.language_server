@@ -9,7 +9,7 @@ from pyqode.language_server.backend.workers import run_diagnostics
 
 class DiagnosticsMode(CheckerMode):
     
-    server_status_changed = Signal(int)
+    server_status_changed = Signal(int, int)
 
     def __init__(self):
         self._last_server_status = None
@@ -17,10 +17,13 @@ class DiagnosticsMode(CheckerMode):
 
     def _on_work_finished(self, results):
         
-        if not results:
+        # Check if the result is valid
+        if not isinstance(results, dict) or 'server_status' not in results:
             return
-        server_status = results.pop(0)
-        if server_status != self._last_server_status:
-            self.server_status_changed.emit(server_status)
-            self._last_server_status = server_status
-        super()._on_work_finished(results)
+        if results['server_status'] != self._last_server_status:
+            self.server_status_changed.emit(
+                results['server_status'],
+                results['server_pid']
+            )
+            self._last_server_status = results['server_status']
+        super()._on_work_finished(results['messages'])
