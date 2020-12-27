@@ -7,6 +7,7 @@ import shlex
 import time
 import logging
 import subprocess
+import difflib
 from contextlib import contextmanager
 from pylspclient import JsonRpcEndpoint, LspEndpoint, LspClient, lsp_structs
 from pylspclient.lsp_structs import (
@@ -32,6 +33,8 @@ ICONS = {
     CompletionItemKind.Variable: ICON_VAR,
     CompletionItemKind.Keyword: ICON_KEYWORD,
 }
+MAX_COMPLETIONS = 10  # Limit the number of completion suggestions
+RESPONSE_TIMEOUT = 5  # Restart server if no response is received after timeout
 SERVER_NOT_STARTED = 0
 SERVER_RUNNING = 1
 SERVER_ERROR = 2
@@ -72,9 +75,9 @@ CLIENT_CAPABILITIES = {
 
 
 def start_language_server(cmd, folders):
+    """Starts the language server and waits for initialization to complete."""
     
     global client, server_process, server_cmd, server_status, project_folders
-    
     print('starting language server: "{}"'.format(cmd))
     try:
         server_process = subprocess.Popen(
@@ -95,7 +98,8 @@ def start_language_server(cmd, folders):
         json_rpc_endpoint,
         notify_callbacks={
             'textDocument/publishDiagnostics': on_publish_diagnostics
-        }
+        },
+        timeout=RESPONSE_TIMEOUT
     )
     client = LspClient(endpoint)
     project_folders = _path_to_uri(folders)
@@ -120,6 +124,7 @@ def start_language_server(cmd, folders):
 
 
 def restart_language_server():
+    """Kills a running language server and restarts it."""
     
     global client, server_status
     print('killing language server')
@@ -131,18 +136,8 @@ def restart_language_server():
     start_language_server(server_cmd, project_folders)
 
 
-def open_document(request_data):
-
-    if server_status != SERVER_RUNNING:
-        return
-    code = request_data['code']
-    path = request_data['path']
-    print('opening document "{}"'.format(path))
-    td = _text_document(path, code)
-    client.didOpen(td)
-
-
 def change_project_folders(request_data):
+    """Changes the project folders. Currently not implemented in pylsp."""
     
     if server_status != SERVER_RUNNING:
         return
@@ -151,6 +146,7 @@ def change_project_folders(request_data):
     
 
 def calltips(request_data):
+    """Requests calltips (signatures) from the server."""
 
     if server_status != SERVER_RUNNING:
         return ()
@@ -164,21 +160,33 @@ def calltips(request_data):
     # to the server. Therefore we first try to get signatures once, and then if
     # this fails, try again but this time after sending a didOpen.
     for attempt in range(2):
-        signatures = _run_command(
-            'signatures(attempt={}, line={}, column={})'.format(
-                attempt,
-                line,
-                column
-            ),
-            client.signatureHelp,
-            (td, Position(line, column))
-        )
-        if signatures is not None and signatures.signatures:
-            break
+        try:
+            signatures = _run_command(
+                'signatures(attempt={}, line={}, column={})'.format(
+                    attempt,
+                    line,
+                    column
+                ),
+                client.signatureHelp,
+                (td, Position(line, column))
+            )
+        except TypeError:
+            # The TypeScript server tends to give TypeErrors on the first try
+            print('signatures gave TypeError')
+        else:
+            if signatures is not None and signatures.signatures:
+                break
         client.didOpen(td)
     else:
         return ()
     signature = signatures.signatures[signatures.activeSignature]
+    # Some servers give a documentation string directly, others a dict with a
+    # value and a format.
+    if isinstance(signature.documentation, dict):
+        if 'value' in signature.documentation:
+            signature.documentation = signature.documentation['value']
+        else:
+            signature.documentation = ''
     return (
         signature.label,
         [p.label for p in signature.parameters],
@@ -189,6 +197,7 @@ def calltips(request_data):
 
 
 def symbols(request_data):
+    """Requests document symbols from the server."""
     
     if server_status != SERVER_RUNNING:
         return []
@@ -208,10 +217,38 @@ def symbols(request_data):
         for s in symbols
         if s.kind.name in symbol_kind
     ]
+    
+    
+class CompletionMatch(str):
+    """Allows a full completion item to be processed by difflib by behaving as
+    a string.
+    """
+    
+    tooltip = None
+    icon = None
+    
+    def to_dict(self):
+        
+        return {'name': self, 'icon': self.icon, 'tooltip': self.tooltip}
+        
+    @classmethod
+    def from_completion(cls, completion):
+
+        # The label tends to include parentheses etc., and that's why it's
+        # better to use insertText when available.
+        text = completion.insertText
+        if not text:
+            text = completion.label
+        completion_match = cls(text)
+        completion_match.icon = ICONS.get(completion.kind, ICON_VAR)
+        completion_match.tooltip = completion.detail
+        return completion_match
 
 
 class CompletionProvider:
-    """Provides code completion."""
+    """Provides a completer function. The rest of the worker is implemented in
+    pyqode.core.
+    """
 
     @staticmethod
     def complete(code, line, column, path, encoding, prefix):
@@ -236,61 +273,66 @@ class CompletionProvider:
         # a list, whereas other servers return the items as a property.
         if hasattr(completions, 'items'):
             completions = completions.items
-        ret_val = []
-        for completion in completions:
-            # The label tends to include parentheses etc., and that's why it's
-            # better to use insertText when available.
-            text = completion.insertText
-            if not text:
-                text = completion.label
-            ret_val.append({
-                'name': text,
-                'icon': ICONS.get(completion.kind, ICON_VAR),
-                'tooltip': completion.detail
-            })
-        print('completion() gave {} suggestions'.format(len(ret_val)))
-        return ret_val
+        # The CompletionMatch class behaves as a string, but also remembers
+        # the tooltip and icon of a completion. We use difflib to get the best
+        # matching completions, and then return these as a list of dicts.
+        matches = difflib.get_close_matches(
+            prefix,
+            possibilities=set(
+                CompletionMatch.from_completion(completion)
+                for completion in completions
+            ),
+            n=MAX_COMPLETIONS,
+            cutoff=0
+        )
+        print('completion() gave {} suggestions'.format(len(matches)))
+        return [match.to_dict() for match in matches]
     
     
 def on_publish_diagnostics(d):
+    """Is called by the server when diagnostic info is available."""
     
     global diagnostics
     diagnostics = d
 
 
 def run_diagnostics(request_data):
+    """Sends a didOpen to the server to start a diagnostic check. Immediately
+    returns information about the server status, but the actual diagnostics
+    messages are returned by poll_diagnostics() to avoid diagnostics from
+    blocking the server.
+    """
     
+    global diagnostics
     if server_status != SERVER_RUNNING:
         return [server_status]
-    global diagnostics
     diagnostics = {}
     code = request_data['code']
     path = request_data['path']
-    ignore_rules = request_data['ignore_rules']
-    td = _text_document(path, code)
-    ret_val = {
+    client.didOpen(_text_document(path, code))
+    return {
         'server_status': server_status,
         'server_pid': server_process.pid,
-        'messages': []
     }
-    with _timer('diagnostics'):
-        client.didOpen(td)
-        for _ in range(20):
-            if diagnostics:
-                break
-            time.sleep(0.1)
-        else:
-            print('run_diagnostics() timed out')
-            return ret_val
+
+
+def poll_diagnostics(request_data):
+    """Returns diagnostic messages if they are available."""
+    
+    if not diagnostics:
+        return [None]
+    ignore_rules = request_data['ignore_rules']
     d = diagnostics.get('diagnostics', [])
+    ret_val = []
     for msg in d:
         if any(msg['message'].startswith(ir) for ir in ignore_rules):
             continue
-        ret_val['messages'].append((
+        ret_val.append((
             msg['message'],
             ERROR if msg['severity'] <= DiagnosticSeverity.Error else WARNING,
             msg['range']['start']['line']
         ))
+    print('{} diagnostic messages'.format(len(ret_val)))
     return ret_val
 
 
@@ -304,6 +346,7 @@ def _text_document(path, code):
 @contextmanager
 def _timer(msg):
     
+    print('starting {}'.format(msg))
     t0 = time.time()
     yield
     t1 = time.time()
@@ -327,4 +370,7 @@ def _run_command(name, fnc, args):
 
 def _path_to_uri(paths, prefix='file://'):
     
-    return [prefix + path for path in paths]
+    return [
+        path if path.startswith(prefix) else prefix + path
+        for path in paths
+    ]

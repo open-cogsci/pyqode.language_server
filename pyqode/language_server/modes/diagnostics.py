@@ -3,8 +3,11 @@
 This module contains the pyFlakes checker mode
 """
 from pyqode.core.modes import CheckerMode
-from pyqode.qt.QtCore import Signal
-from pyqode.language_server.backend.workers import run_diagnostics
+from pyqode.qt.QtCore import Signal, QTimer
+from pyqode.language_server.backend.workers import (
+    run_diagnostics,
+    poll_diagnostics
+)
 
 
 class DiagnosticsMode(CheckerMode):
@@ -15,6 +18,21 @@ class DiagnosticsMode(CheckerMode):
         self._last_server_status = None
         super().__init__(run_diagnostics, delay=1000)
 
+    def _on_poll_result(self, results):
+        
+        if len(results) == 1 and results[0] is None:
+            QTimer.singleShot(250, self._poll_messages)
+            return
+        super()._on_work_finished(results)
+        
+    def _poll_messages(self):
+
+        self.editor.backend.send_request(
+            poll_diagnostics,
+            {'ignore_rules': self.ignore_rules},
+            on_receive=self._on_poll_result
+        )
+        
     def _on_work_finished(self, results):
         
         # Check if the result is valid
@@ -26,4 +44,4 @@ class DiagnosticsMode(CheckerMode):
                 results['server_pid']
             )
             self._last_server_status = results['server_status']
-        super()._on_work_finished(results['messages'])
+        QTimer.singleShot(250, self._poll_messages)
