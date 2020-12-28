@@ -16,7 +16,9 @@ from pylspclient.lsp_structs import (
     CompletionContext,
     CompletionTriggerKind,
     CompletionItemKind,
-    DiagnosticSeverity
+    DiagnosticSeverity,
+    VersionedTextDocumentIdentifier,
+    TextDocumentContentChangeEvent,
 )
 
 WARNING = 1
@@ -38,6 +40,7 @@ RESPONSE_TIMEOUT = 5  # Restart server if no response is received after timeout
 SERVER_NOT_STARTED = 0
 SERVER_RUNNING = 1
 SERVER_ERROR = 2
+CLIENT_CAPABILITIES = {}  # For now go with defaults
 
 client = None  # Set by start_language_server
 server_status = SERVER_NOT_STARTED
@@ -46,32 +49,9 @@ server_process = None
 server_cmd = None
 project_folders = None
 diagnostics = {}  # Set by on_publish_diagnostics
-document_version = 0
-
-
-CLIENT_CAPABILITIES = {
-    'textDocument': {
-        'completion': {
-            'completionItem': {
-                'commitCharactersSupport': True,
-                'documentationFormat': ['markdown', 'plaintext'],
-                'snippetSupport': True
-            },
-            'completionItemKind': {
-                'valueSet': []
-            },
-            'contextSupport': True,
-        },
-        'documentSymbol': {
-            'symbolKind': {
-                'valueSet': []
-            }
-        },
-        'publishDiagnostics': {
-            'relatedInformation': True
-        }
-    }
-}
+# Maintains opened documents as path => version mappings. The empty string is
+# used as the path for new (unsaved) documents.
+open_documents = {'': 0}
 
 
 def start_language_server(cmd, folders):
@@ -175,7 +155,10 @@ def calltips(request_data):
         else:
             if signatures is not None and signatures.signatures:
                 break
-        client.didOpen(td)
+        client.didChange(
+            _text_identifier(**request_data),
+            [_everything_changed(**request_data)]
+        )
     else:
         return ()
     signature = signatures.signatures[signatures.activeSignature]
@@ -255,16 +238,34 @@ class CompletionProvider:
         
         column += len(prefix)  # Go to the cursor position
         td = _text_document(path, code)
-        completions = _run_command(
-            'completions(line={}, col={})'.format(line, column),
-            client.completion,
-            (
-                td,
-                Position(line, column),
-                CompletionContext(CompletionTriggerKind.Invoked)
+        # Similar to the calltips function, it appears that the first
+        # completion request sometimes fails with a ResponseError. When this
+        # happens, we send a didChange and try again. This appears to work.
+        for attempt in range(2):
+            try:
+                completions = _run_command(
+                    'completions(attempt={}, line={}, col={})'.format(
+                        attempt,
+                        line,
+                        column
+                    ),
+                    client.completion,
+                    (
+                        td,
+                        Position(line, column),
+                        CompletionContext(CompletionTriggerKind.Invoked)
+                    )
+                )
+            except lsp_structs.ResponseError:
+                print('completions gave ResponseError')
+            else:
+                if completions is not None:
+                    break
+            client.didChange(
+                _text_identifier(path),
+                [_everything_changed(code)]
             )
-        )
-        if completions is None:
+        else:
             return []
         # It appears that the TypeScript server returns the items directly as
         # a list, whereas other servers return the items as a property.
@@ -294,17 +295,25 @@ def on_publish_diagnostics(d):
 
 
 def run_diagnostics(request_data):
-    """Sends a didOpen to the server to start a diagnostic check. Immediately
-    returns information about the server status, but the actual diagnostics
-    messages are returned by poll_diagnostics() to avoid diagnostics from
-    blocking the server.
+    """Sends a didOpen or didChange to the server to start a diagnostic check.
+    Immediately returns information about the server status, but the actual
+    diagnostics messages are returned by poll_diagnostics() to avoid
+    diagnostics from blocking the server.
     """
     
     global diagnostics
     if server_status != SERVER_RUNNING:
         return [server_status]
     diagnostics = {}
-    client.didOpen(_text_document(**request_data))
+    path = request_data['path']
+    if path in open_documents and False:
+        client.didChange(
+            _text_identifier(**request_data),
+            [_everything_changed(**request_data)]
+        )
+    else:
+        open_documents[path] = 0
+        client.didOpen(_text_document(**request_data))
     return {
         'server_status': server_status,
         'server_pid': server_process.pid,
@@ -332,22 +341,52 @@ def poll_diagnostics(request_data):
 
 
 def close_document(request_data):
+    """Sends a didClose to the server to indicate that the document was closed
+    in the client.
+    """
 
     if server_status != SERVER_RUNNING:
         return
+    del open_documents[request_data['path']]
     # Not implemented yet in pylsp
     # client.didClose(_text_document(**request_data))
 
 
 def _text_document(path=None, code=None, **kwargs):
+    """Constructs a TextDocumentItem."""
     
-    global document_version
-    document_version += 1
-    return TextDocumentItem('file://' + path, langid, document_version, code)
+    open_documents[path] += 1
+    return TextDocumentItem(
+        'file://' + path,
+        langid,
+        open_documents[path],
+        code
+    )
     
+    
+def _text_identifier(path=None, **kwargs):
+    """Constructs a VersionedTextDocumentIdentifier."""
+    
+    open_documents[path] += 1
+    return VersionedTextDocumentIdentifier(
+        'file://' + path,
+        open_documents[path]
+    )
+    
+    
+def _everything_changed(code=None, **kwargs):
+    """Constructs a TextDocumentContentChangeEvent that corresponds to the
+    entire file being changed.
+    """
+    
+    return TextDocumentContentChangeEvent(None, None, code)
+
 
 @contextmanager
 def _timer(msg):
+    """A basic context manager to check the timing of functions. Mostly
+    useful for debugging and improving performance.
+    """
     
     print('starting {}'.format(msg))
     t0 = time.time()
@@ -357,12 +396,17 @@ def _timer(msg):
 
 
 def _run_command(name, fnc, args):
+    """Sends a command to the server and returns the response. If a
+    ResponseError occurs, None is returned. If a TimeoutError occurs, None is
+    also returned, and the server is restarted (because it may be hanging).
+    """
     
     with _timer(name):
         try:
             ret_val = fnc(*args)
-        except lsp_structs.ResponseError:
+        except lsp_structs.ResponseError as e:
             print('{}() gave ResponseError'.format(name))
+            print(str(e))
             ret_val = None
         except TimeoutError:
             print('{}() gave TimeoutError'.format(name))
@@ -372,6 +416,7 @@ def _run_command(name, fnc, args):
 
 
 def _path_to_uri(paths, prefix='file://'):
+    """Turns a list of paths or uris into a list of uris."""
     
     return [
         path if path.startswith(prefix) else prefix + path
