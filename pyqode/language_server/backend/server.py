@@ -37,7 +37,7 @@ if __name__ == '__main__':
     from pyqode.language_server.backend import workers
 
     workers.start_language_server(args.command, args.project_folders)
-    workers.langid = args.langid
+    workers.langid = args.langid.lower()
     backend.CodeCompletionWorker.providers += [
         workers.CompletionProvider(),
         backend.DocumentWordsProvider()

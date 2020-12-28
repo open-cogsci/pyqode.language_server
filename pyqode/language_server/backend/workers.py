@@ -142,6 +142,7 @@ def change_project_folders(request_data):
     if server_status != SERVER_RUNNING:
         return
     folders = request_data['folders']
+    # Not implemented yet in pylsp
     print('changing workspace folders: {}'.format(folders))
     
 
@@ -150,12 +151,10 @@ def calltips(request_data):
 
     if server_status != SERVER_RUNNING:
         return ()
-    code = request_data['code']
     line = request_data['line']
     column = request_data['column']
-    path = request_data['path']
     logging.debug(request_data)
-    td = _text_document(path, code)
+    td = _text_document(**request_data)
     # It appears that pyls returns an empty signature unless a didOpen is sent
     # to the server. Therefore we first try to get signatures once, and then if
     # this fails, try again but this time after sending a didOpen.
@@ -201,10 +200,8 @@ def symbols(request_data):
     
     if server_status != SERVER_RUNNING:
         return []
-    code = request_data['code']
-    path = request_data['path']
     symbol_kind = request_data['kind']
-    td = _text_document(path, code)
+    td = _text_document(**request_data)
     symbols = _run_command(
         'symbols',
         client.documentSymbol,
@@ -307,9 +304,7 @@ def run_diagnostics(request_data):
     if server_status != SERVER_RUNNING:
         return [server_status]
     diagnostics = {}
-    code = request_data['code']
-    path = request_data['path']
-    client.didOpen(_text_document(path, code))
+    client.didOpen(_text_document(**request_data))
     return {
         'server_status': server_status,
         'server_pid': server_process.pid,
@@ -336,7 +331,15 @@ def poll_diagnostics(request_data):
     return ret_val
 
 
-def _text_document(path, code):
+def close_document(request_data):
+
+    if server_status != SERVER_RUNNING:
+        return
+    # Not implemented yet in pylsp
+    # client.didClose(_text_document(**request_data))
+
+
+def _text_document(path=None, code=None, **kwargs):
     
     global document_version
     document_version += 1
