@@ -66,7 +66,8 @@ def start_language_server(cmd, folders):
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE
         )
-    except FileNotFoundError:
+    except FileNotFoundError as e:
+        print('failed to start language server: {}"'.format(e))
         server_status = SERVER_ERROR
         return
     server_status = SERVER_RUNNING
@@ -303,7 +304,10 @@ def run_diagnostics(request_data):
     
     global diagnostics
     if server_status != SERVER_RUNNING:
-        return [server_status]
+        return {
+            'server_status': server_status,
+            'server_pid': None
+        }
     diagnostics = {}
     path = request_data['path']
     if path in open_documents and False:
@@ -347,7 +351,9 @@ def close_document(request_data):
 
     if server_status != SERVER_RUNNING:
         return
-    del open_documents[request_data['path']]
+    path = request_data['path']
+    if path in open_documents:
+        del open_documents[path]
     # Not implemented yet in pylsp
     # client.didClose(_text_document(**request_data))
 
