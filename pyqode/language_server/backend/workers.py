@@ -3,11 +3,13 @@
 Contains the worker classes/functions executed on the server side.
 """
 
+import os
 import shlex
 import time
 import logging
 import subprocess
 import difflib
+import tempfile
 from contextlib import contextmanager
 from pylspclient import JsonRpcEndpoint, LspEndpoint, LspClient, lsp_structs
 from pylspclient.lsp_structs import (
@@ -52,6 +54,7 @@ diagnostics = {}  # Set by on_publish_diagnostics
 # Maintains opened documents as path => version mappings. The empty string is
 # used as the path for new (unsaved) documents.
 open_documents = {'': 0}
+_, tmp_path = tempfile.mkstemp('pyqode.language_server')
 
 
 def start_language_server(cmd, folders):
@@ -83,7 +86,7 @@ def start_language_server(cmd, folders):
         timeout=RESPONSE_TIMEOUT
     )
     client = LspClient(endpoint)
-    project_folders = _path_to_uri(folders)
+    project_folders = _folders_to_uris(folders)
     try:
         client.initialize(
             processId=server_process.pid,
@@ -356,14 +359,14 @@ def close_document(request_data):
         del open_documents[path]
     # Not implemented yet in pylsp
     # client.didClose(_text_document(**request_data))
-
+    
 
 def _text_document(path=None, code=None, **kwargs):
     """Constructs a TextDocumentItem."""
     
     open_documents[path] += 1
     return TextDocumentItem(
-        'file://' + path,
+        _path_to_uri(path),
         langid,
         open_documents[path],
         code
@@ -421,10 +424,22 @@ def _run_command(name, fnc, args):
     return ret_val
 
 
-def _path_to_uri(paths, prefix='file://'):
+def _folders_to_uris(paths, prefix='file://'):
     """Turns a list of paths or uris into a list of uris."""
     
     return [
         path if path.startswith(prefix) else prefix + path
         for path in paths
     ]
+
+
+def _path_to_uri(path):
+    """Translates a path to a uri, falling back to a temporary file if the path
+    does not exist.
+    """
+    
+    if path.startswith('file://'):
+        return path
+    if os.path.exists(path):
+        return 'file://' + path
+    return 'file://' + tmp_path
