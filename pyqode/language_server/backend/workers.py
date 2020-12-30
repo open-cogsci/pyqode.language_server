@@ -287,7 +287,7 @@ class CompletionProvider:
             n=MAX_COMPLETIONS,
             cutoff=0
         )
-        print('completion() gave {} suggestions'.format(len(matches)))
+        print('completions gave {} suggestions'.format(len(matches)))
         return [match.to_dict() for match in matches]
     
     
@@ -364,6 +364,8 @@ def close_document(request_data):
 def _text_document(path=None, code=None, **kwargs):
     """Constructs a TextDocumentItem."""
     
+    if not code.endswith('\n'):
+        code += '\n'
     open_documents[path] += 1
     return TextDocumentItem(
         _path_to_uri(path),
@@ -388,6 +390,8 @@ def _everything_changed(code=None, **kwargs):
     entire file being changed.
     """
     
+    if not code.endswith('\n'):
+        code += '\n'
     return TextDocumentContentChangeEvent(None, None, code)
 
 
