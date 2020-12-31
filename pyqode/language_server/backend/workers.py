@@ -331,7 +331,7 @@ def run_diagnostics(request_data):
         return {
             'server_status': server_status,
             'server_pid': None,
-            'server_capabilities': None
+            'server_capabilities': {}
         }
     diagnostics = {}
     path = request_data['path']
