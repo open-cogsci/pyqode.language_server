@@ -14,8 +14,14 @@ class DiagnosticsMode(CheckerMode):
     
     server_status_changed = Signal(int, int, dict)
 
-    def __init__(self):
+    def __init__(self, show_diagnostics=True):
+        """The show_diagnostics keyword determines whether the diagnostic
+        messages are actually shown. If not, then the mode only does basic
+        bookkeeping which is required for LSP support in general.
+        """
+        
         self._last_server_status = None
+        self._show_diagnostics = show_diagnostics
         super().__init__(run_diagnostics, delay=1000)
 
     def _on_poll_result(self, results):
@@ -46,7 +52,8 @@ class DiagnosticsMode(CheckerMode):
             )
             self._set_completion_triggers(results['server_capabilities'])
             self._last_server_status = results['server_status']
-        QTimer.singleShot(250, self._poll_messages)
+        if self._show_diagnostics:
+            QTimer.singleShot(250, self._poll_messages)
 
     def _set_completion_triggers(self, capabilities):
         """If CodeCompletionMode is enabled, set the trigger symbols to the
