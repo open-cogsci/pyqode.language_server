@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-This setup script packages pyqode.python
+This setup script packages pyqode.language_server
 """
 import sys
 import os
@@ -21,11 +21,14 @@ def readme():
 pypi_release = os.environ.get('PYPI_RELEASE', 0)
 
 requirements = [
-    'pyqode.qt',
-    'pyqode3.core' if pypi_release else 'pyqode.core',
+    'pyqode3.python' if pypi_release else 'pyqode.python',
 ]
 setup(
-    name='pyqode3.language_server' if pypi_release else 'pyqode.language_server',
+    name=(
+        'pyqode3.language_server'
+        if pypi_release
+        else 'pyqode.language_server'
+    ),
     namespace_packages=['pyqode'],
     version=__version__,
     packages=[p for p in find_packages() if 'test' not in p],
