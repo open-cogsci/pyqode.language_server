@@ -42,11 +42,16 @@ RESPONSE_TIMEOUT = 5  # Restart server if no response is received after timeout
 SERVER_NOT_STARTED = 0
 SERVER_RUNNING = 1
 SERVER_ERROR = 2
-CLIENT_CAPABILITIES = {}  # For now go with defaults
+CLIENT_CAPABILITIES = {
+    'completionItem': {
+        'snippetSupport': False
+    }
+}  # For now go with defaults
 
 client = None  # Set by start_language_server
 server_status = SERVER_NOT_STARTED
-langid = None  # Set by server
+server_capabilities = None
+langid = None
 server_process = None
 server_cmd = None
 project_folders = None
@@ -61,6 +66,8 @@ def start_language_server(cmd, folders):
     """Starts the language server and waits for initialization to complete."""
     
     global client, server_process, server_cmd, server_status, project_folders
+    global server_capabilities
+
     print('starting language server: "{}"'.format(cmd))
     try:
         server_process = subprocess.Popen(
@@ -88,7 +95,7 @@ def start_language_server(cmd, folders):
     client = LspClient(endpoint)
     project_folders = _folders_to_uris(folders)
     try:
-        client.initialize(
+        server_capabilities = client.initialize(
             processId=server_process.pid,
             rootPath=None,
             rootUri=project_folders[0],
@@ -103,6 +110,7 @@ def start_language_server(cmd, folders):
         return
     client.initialized()
     server_cmd = cmd
+    print(server_capabilities)
     print('project_folders {}'.format(project_folders))
     print('language server started')
 
@@ -235,7 +243,15 @@ class CompletionProvider:
     """
 
     @staticmethod
-    def complete(code, line, column, path, encoding, prefix):
+    def complete(
+        code,
+        line,
+        column,
+        path,
+        encoding,
+        prefix,
+        triggered_by_symbol
+    ):
         """
         :returns: a list of completions.
         """
@@ -248,16 +264,21 @@ class CompletionProvider:
         for attempt in range(2):
             try:
                 completions = _run_command(
-                    'completions(attempt={}, line={}, col={})'.format(
+                    'completions(#{}, line={}, col={}, trig={})'.format(
                         attempt,
                         line,
-                        column
+                        column,
+                        triggered_by_symbol
                     ),
                     client.completion,
                     (
                         td,
                         Position(line, column),
-                        CompletionContext(CompletionTriggerKind.Invoked)
+                        CompletionContext(
+                            CompletionTriggerKind.TriggerCharacter
+                            if triggered_by_symbol
+                            else CompletionTriggerKind.Invoked
+                        )
                     )
                 )
             except lsp_structs.ResponseError:
@@ -309,7 +330,8 @@ def run_diagnostics(request_data):
     if server_status != SERVER_RUNNING:
         return {
             'server_status': server_status,
-            'server_pid': None
+            'server_pid': None,
+            'server_capabilities': None
         }
     diagnostics = {}
     path = request_data['path']
@@ -324,6 +346,7 @@ def run_diagnostics(request_data):
     return {
         'server_status': server_status,
         'server_pid': server_process.pid,
+        'server_capabilities': server_capabilities
     }
 
 
