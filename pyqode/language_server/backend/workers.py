@@ -42,11 +42,7 @@ RESPONSE_TIMEOUT = 5  # Restart server if no response is received after timeout
 SERVER_NOT_STARTED = 0
 SERVER_RUNNING = 1
 SERVER_ERROR = 2
-CLIENT_CAPABILITIES = {
-    'completionItem': {
-        'snippetSupport': False
-    }
-}  # For now go with defaults
+CLIENT_CAPABILITIES = {}  # For now go with defaults
 
 client = None  # Set by start_language_server
 server_status = SERVER_NOT_STARTED
@@ -256,6 +252,8 @@ class CompletionProvider:
         :returns: a list of completions.
         """
         
+        if server_status != SERVER_RUNNING:
+            return []
         column += len(prefix)  # Go to the cursor position
         td = _text_document(path, code)
         # Similar to the calltips function, it appears that the first
