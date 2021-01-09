@@ -362,7 +362,11 @@ def poll_diagnostics(request_data):
         ret_val.append((
             msg['message'],
             ERROR if msg['severity'] <= DiagnosticSeverity.Error else WARNING,
-            msg['range']['start']['line']
+            msg['range']['start']['line'],
+            (
+                msg['range']['start']['character'],
+                msg['range']['end']['character']
+            )
         ))
     print('{} diagnostic messages'.format(len(ret_val)))
     return ret_val
