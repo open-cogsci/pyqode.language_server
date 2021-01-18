@@ -70,7 +70,8 @@ def start_language_server(cmd, folders):
             shlex.split(cmd),
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
+            stderr=subprocess.PIPE,
+            shell=True  # Otherwise the binary may not be found on Windows
         )
     except FileNotFoundError as e:
         print('failed to start language server: {}"'.format(e))
@@ -94,11 +95,11 @@ def start_language_server(cmd, folders):
         server_capabilities = client.initialize(
             processId=server_process.pid,
             rootPath=None,
-            rootUri=project_folders[0],
+            rootUri=None if not project_folders else project_folders[0],
             initializationOptions=None,
             capabilities=CLIENT_CAPABILITIES,
             trace='off',
-            workspaceFolders=project_folders
+            workspaceFolders=None if not project_folders else project_folders
         )
     except lsp_structs.ResponseError as e:
         print('failed to initialize language server: {}'.format(e))

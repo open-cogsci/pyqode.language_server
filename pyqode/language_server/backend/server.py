@@ -27,8 +27,9 @@ if __name__ == '__main__':
         help='The language identifier'
     )
     parser.add_argument(
-        'project_folders',
-        nargs='+',
+        '--project-folders',
+        nargs='*',
+        default=[],
         help='A list of project folders'
     )
     args = parser.parse_args()
