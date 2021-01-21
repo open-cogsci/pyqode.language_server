@@ -38,7 +38,7 @@ ICONS = {
     CompletionItemKind.Keyword: ICON_KEYWORD,
 }
 MAX_COMPLETIONS = 10  # Limit the number of completion suggestions
-RESPONSE_TIMEOUT = 5  # Restart server if no response is received after timeout
+RESPONSE_TIMEOUT = 10  # Restart server if no response is received after timeout
 SERVER_NOT_STARTED = 0
 SERVER_RUNNING = 1
 SERVER_ERROR = 2
@@ -71,7 +71,7 @@ def start_language_server(cmd, folders):
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            shell=True  # Otherwise the binary may not be found on Windows
+            shell=False  # Otherwise the binary may not be found on Windows
         )
     except FileNotFoundError as e:
         print('failed to start language server: {}"'.format(e))
@@ -101,7 +101,7 @@ def start_language_server(cmd, folders):
             trace='off',
             workspaceFolders=None if not project_folders else project_folders
         )
-    except lsp_structs.ResponseError as e:
+    except (lsp_structs.ResponseError, TimeoutError) as e:
         print('failed to initialize language server: {}'.format(e))
         server_status = SERVER_ERROR
         return
