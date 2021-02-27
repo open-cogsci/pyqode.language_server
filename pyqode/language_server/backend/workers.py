@@ -440,6 +440,8 @@ def _run_command(name, fnc, args):
     also returned, and the server is restarted (because it may be hanging).
     """
     
+    if server_status != SERVER_RUNNING:
+        print('{} not performed because server not running'.format(name))
     with _timer(name):
         try:
             ret_val = fnc(*args)
