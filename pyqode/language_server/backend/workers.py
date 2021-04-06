@@ -58,7 +58,7 @@ open_documents = {'': 0}
 _, tmp_path = tempfile.mkstemp('pyqode.language_server')
 
 
-def start_language_server(cmd, folders):
+def start_language_server(cmd, folders, shell=False):
     """Starts the language server and waits for initialization to complete."""
     
     global client, server_process, server_cmd, server_status, project_folders
@@ -71,10 +71,17 @@ def start_language_server(cmd, folders):
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            shell=False  # Otherwise the binary may not be found on Windows
+            shell=shell
         )
     except FileNotFoundError as e:
         print('failed to start language server: {}"'.format(e))
+        if not shell:
+            # If the language server cannot be found, then perhaps trying 
+            # through the shell works, because that way it can make use of
+            # paths etc.
+            print('retrying through shell')
+            start_language_server(cmd, folders, shell=True)
+            return
         server_status = SERVER_ERROR
         return
     server_status = SERVER_RUNNING
