@@ -23,6 +23,11 @@ from pylspclient.lsp_structs import (
     TextDocumentContentChangeEvent,
 )
 
+try:
+    BrokenPipeError
+except NameError:
+    BrokenPipeError = Exception  # For Python 2
+
 WARNING = 1
 ERROR = 2
 ICON_PATH = ('path', ':/pyqode_python_icons/rc/path.png')
@@ -108,7 +113,7 @@ def start_language_server(cmd, folders, shell=False):
             trace='off',
             workspaceFolders=None if not project_folders else project_folders
         )
-    except (lsp_structs.ResponseError, TimeoutError) as e:
+    except (lsp_structs.ResponseError, TimeoutError, BrokenPipeError) as e:
         print('failed to initialize language server: {}'.format(e))
         server_status = SERVER_ERROR
         return
