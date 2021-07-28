@@ -35,7 +35,10 @@ class DiagnosticsMode(CheckerMode):
 
         self.editor.backend.send_request(
             poll_diagnostics,
-            {'ignore_rules': self.ignore_rules},
+            {
+                'path': self.editor.file.path,
+                'ignore_rules': self.ignore_rules
+            },
             on_receive=self._on_poll_result
         )
         
@@ -44,6 +47,7 @@ class DiagnosticsMode(CheckerMode):
         # Check if the result is valid
         if not isinstance(results, dict) or 'server_status' not in results:
             return
+        # Check if the server status changed
         if results['server_status'] != self._last_server_status:
             self.server_status_changed.emit(
                 results['server_status'],

@@ -326,8 +326,10 @@ class CompletionProvider:
 def on_publish_diagnostics(d):
     """Is called by the server when diagnostic info is available."""
     
-    global diagnostics
-    diagnostics = d
+    msg = d.get('diagnostics', [])
+    uri = d.get('uri', None)
+    print('publishing diagnostic {} messages for {}'.format(len(msg), uri))
+    diagnostics[uri] = d
 
 
 def run_diagnostics(request_data):
@@ -344,9 +346,10 @@ def run_diagnostics(request_data):
             'server_pid': None,
             'server_capabilities': {}
         }
-    diagnostics = {}
     path = request_data['path']
-    if path in open_documents and False:
+    print('opening  {}'.format(path))
+    diagnostics[_path_to_uri(path)] = {}  # reset diagnostics for this file
+    if path in open_documents:
         client.didChange(
             _text_identifier(**request_data),
             [_everything_changed(**request_data)]
@@ -364,12 +367,13 @@ def run_diagnostics(request_data):
 def poll_diagnostics(request_data):
     """Returns diagnostic messages if they are available."""
     
-    if not diagnostics:
+    uri = _path_to_uri(request_data['path'])
+    d = diagnostics.get(uri)
+    if not d:
         return [None]
     ignore_rules = request_data['ignore_rules']
-    d = diagnostics.get('diagnostics', [])
     ret_val = []
-    for msg in d:
+    for msg in d.get('diagnostics', []):
         if any(msg['message'].startswith(ir) for ir in ignore_rules):
             continue
         ret_val.append((
@@ -381,7 +385,10 @@ def poll_diagnostics(request_data):
                 msg['range']['end']['character']
             )
         ))
-    print('{} diagnostic messages'.format(len(ret_val)))
+    print('polling {} diagnostic messages for {}'.format(
+        len(ret_val),
+        format(uri))
+    )
     return ret_val
 
 
