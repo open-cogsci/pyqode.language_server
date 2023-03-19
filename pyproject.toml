@@ -1,0 +1,18 @@
+[build-system]
+requires = ["flit_core >=3.4"]
+build-backend = "flit_core.buildapi"
+[project]
+name = "pyqode-language-server"
+authors = [
+    {name = "Sebastiaan Mathôt", email = "s.mathot@cogsci.nl"}
+]
+readme = "README.rst"
+license = {file = "LICENSE"}
+requires-python = ">=3.7"
+dynamic = ["version", "description"]
+keywords = ["CodeEdit", "PyQt", "editor", "lsp", "language-server"]
+[tool.flit.module]
+name = "pyqode.language_server"
+[project.urls]
+Documentation = "https://rapunzel.cogsci.nl/manual/language-server/"
+Source = "https://github.com/open-cogsci/pyqode.language_server"
