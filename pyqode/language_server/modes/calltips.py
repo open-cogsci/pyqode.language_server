@@ -2,8 +2,8 @@
 """
 Gets calltips from the language server
 """
-from pyqode.qt.QtWidgets import QToolTip
-from pyqode.qt.QtCore import QObject, Qt, Signal
+from qtpy.QtWidgets import QToolTip
+from qtpy.QtCore import QObject, Qt, Signal
 from pyqode.core.modes import CalltipsMode as CoreCalltipsMode
 from pyqode.language_server.backend import workers
 from pyqode.language_server.modes import LanguageServerMode

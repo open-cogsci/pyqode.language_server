@@ -4,7 +4,7 @@ A base class for language-server modes.
 """
 import time
 from pyqode.core.api import Mode
-from pyqode.qt import QtCore
+from qtpy import QtCore
 
 
 REQUEST_TIMEOUT = 5

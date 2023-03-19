@@ -3,7 +3,7 @@
 This module contains the LSP diagnostics checker mode
 """
 from pyqode.core.modes import CheckerMode
-from pyqode.qt.QtCore import Signal, QTimer
+from qtpy.QtCore import Signal, QTimer
 from pyqode.language_server.backend.workers import (
     run_diagnostics,
     poll_diagnostics
