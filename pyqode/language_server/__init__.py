@@ -4,4 +4,4 @@ pyqode.language_server is an extension of pyqode.core that brings support
 for language servers.
 """
 
-__version__ = '0.2.1'
+__version__ = '0.2.2'
